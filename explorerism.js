@@ -237,6 +237,7 @@
      function (url)
      {
       var that = this;
+      this.responseXml = null;
       this.open("get", url, false);
 
       if (!("errorCode" in this.parseError))
@@ -301,9 +302,14 @@
       get:
        function ()
        {
-        var parser = new DOMParser();
-        this.responseXml = parser.parseFromString(this.responseText, "text/xml");
-        return this.responseText || "";
+        var parser;
+        if (!this.responseXml)
+        {
+         parser = new DOMParser();
+         this.responseXml = parser.parseFromString(this.responseText, "text/xml");
+        }
+
+        return (this.responseXml && this.responseXml.documentElement && this.responseXml.documentElement.outerHTML) || this.responseText || "";
        }
      });
 
@@ -369,7 +375,7 @@
        column.boundXmlIslandNode = boundNode;
        if ("value" in column)
        {
-        column.value = value;
+        inputValueDescriptor.set.call(column, value);
         column.onchange =
          function ()
          {
@@ -387,7 +393,7 @@
 
     function bindAndPopulateTableElements(element, dataDocument)
     {
-     var originalRow = element.removeChild(element.children[0]),
+     var originalRow = element.originalRow || element.removeChild(element.children[0]),
          root = dataDocument.documentElement,
          dataRows;
      
@@ -447,6 +453,60 @@
      }
      this.boundDestinations = [];
     }
+
+    var textDescriptor =
+         {
+          get:
+              function ()
+              {
+               return this.textContent;
+              },
+          set:
+              function (value)
+              {
+               this.textContent = value;
+               if (this.ownerDocument.observeChanges)
+               {
+                this.ownerDocument.observeChanges();
+               }
+              }
+         },
+        inputValueDescriptor =
+         Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value"),
+        innerHTMLDescriptor =
+         Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+
+    Object.defineProperty(
+        Attr.prototype,
+        "text",
+        textDescriptor);
+
+    Object.defineProperty(
+     HTMLInputElement.prototype,
+     "value",
+     {
+      get:
+       function ()
+       {
+        return inputValueDescriptor.get.call(this);
+       },
+      set:
+       function (value)
+       {
+        if (inputValueDescriptor.get.call(this) === value)
+        {
+         return;
+        }
+
+        inputValueDescriptor.set.call(this, value);
+        if (this.boundXmlIslandNode)
+        {
+         this.boundXmlIslandNode.text = value;
+        }
+       }
+     });
 
     XMLDataIsland.prototype.parseError = {};
 
@@ -582,6 +642,31 @@
 
     Object.defineProperty(
      Element.prototype,
+     "text",
+     textDescriptor);
+
+    Object.defineProperty(
+     Element.prototype,
+     "innerHTML",
+     {
+      get:
+       function ()
+       {
+        return innerHTMLDescriptor.get.call(this) || "";
+       },
+      set:
+       function (value)
+       {
+        innerHTMLDescriptor.set.call(this, value);
+        if (this.boundXmlIslandNode)
+        {
+         this.boundXmlIslandNode.text = this.textContent;
+        }
+       }
+     });
+
+    Object.defineProperty(
+     Element.prototype,
      "XMLDocument",
      {
       get:
@@ -593,36 +678,21 @@
 
     Object.defineProperty(
      Element.prototype,
-     "text",
-     {
-      get:
-       function ()
-       {
-        return this.textContent;
-       },
-      set:
-       function (value)
-       {
-        this.textContent = value;
-        if (this.ownerDocument.observeChanges)
-        {
-         this.ownerDocument.observeChanges();
-        }
-       }
-     });
-
-    Object.defineProperty(
-     Element.prototype,
      "xml",
      {
       get:
        function ()
        {
+        var html;
         if (this.ownerDocument.contentType.includes("xml"))
         {
          return this.outerHTML;
         }
-        return this.innerHTML;
+        if (this.tagName === "XML" && this.XMLDocument.document)
+        {
+         html = this.XMLDocument.document.documentElement.outerHTML;
+        }
+        return html || this.innerHTML || "";
        }
      });
      
